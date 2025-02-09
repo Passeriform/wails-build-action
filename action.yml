@@ -71,6 +71,10 @@ inputs:
     description: "Deno version to use"
     required: false
     default: "v1.20.x"
+  macos-artifact-name:
+    description: "Alternate artifact name for the binary zip"
+    required: false
+    default: ''
   sign-macos-app-id:
     description: "MacOS Application Certificate id"
     required: false
@@ -147,8 +151,8 @@ runs:
           if [[ "$DISTRO" == '24.04' ]]; then
             tags_string+=" webkit2_41"
           fi
-          build_options+=" -tags $tags_string" 
-        elif [[ "${{ inputs.build-tags }}" == "false" && "$DISTRO" == '24.04' ]]; then 
+          build_options+=" -tags $tags_string"
+        elif [[ "${{ inputs.build-tags }}" == "false" && "$DISTRO" == '24.04' ]]; then
           build_options+=" -tags webkit2_41"
         fi
         if ${{ inputs.nsis == true }}; then
@@ -238,19 +242,19 @@ runs:
       working-directory: ${{ inputs.app-working-directory }}
       shell: bash
       run: |
-        ditto -c -k --keepParent ${{ inputs.app-working-directory }}/build/bin/${{inputs.build-name}}.app ${{ inputs.app-working-directory }}/build/bin/${{inputs.build-name}}.app.zip
+        ditto -c -k --keepParent build/bin/${{inputs.build-name}}.app build/bin/${{inputs.build-name}}.app.zip
     - name: Building Installer
       if: runner.os == 'macOS' && inputs.sign != 'false' && inputs.sign-macos-installer-id != '' && startsWith(github.ref, 'refs/tags/')
       shell: bash
       working-directory: ${{ inputs.app-working-directory }}
       run: |
-        productbuild --sign '${{inputs.sign-macos-installer-id}}' --component ${{ inputs.app-working-directory }}/build/bin/${{inputs.build-name}}.app /Applications ${{ inputs.app-working-directory }}/build/bin/${{inputs.build-name}}.pkg
+        productbuild --sign '${{inputs.sign-macos-installer-id}}' --component build/bin/${{inputs.build-name}}.app /Applications build/bin/${{inputs.build-name}}.pkg
     - name: Building Installer
       if: runner.os == 'macOS' && inputs.sign-macos-installer-id == '' && startsWith(github.ref, 'refs/tags/')
       shell: bash
       working-directory: ${{ inputs.app-working-directory }}
       run: |
-        productbuild --component ${{ inputs.app-working-directory }}/build/bin/${{inputs.build-name}}.app /Applications ${{ inputs.app-working-directory }}/build/bin/${{inputs.build-name}}.pkg
+        productbuild --component build/bin/${{inputs.build-name}}.app /Applications build/bin/${{inputs.build-name}}.pkg
     - name: Notarising Installer and zip
       if: runner.os == 'macOS' && inputs.sign != 'false' && startsWith(github.ref, 'refs/tags/')
       shell: bash
@@ -275,15 +279,26 @@ runs:
 
     # Upload build assets
     - uses: actions/upload-artifact@v4
-      if: inputs.package == 'true'
+      if: inputs.package == 'true' && runner.os != 'macOS'
       with:
-        name: Wails Build ${{runner.os}} ${{inputs.build-name}}
-        path: |
-          */bin/
-          *\bin\*
+        name: ${{runner.os}}-${{inputs.build-name}}
+        path: ${{ inputs.app-working-directory }}/build/bin/${{inputs.build-name}}
+        overwrite: true
+        if-no-files-found: error
+    - uses: actions/upload-artifact@v4
+      if: inputs.package == 'true' && runner.os == 'macOS'
+      with:
+        name: ${{runner.os}}-${{inputs.macos-artifact-name || inputs.build-name}}
+        path: ${{ inputs.app-working-directory }}/build/bin/${{inputs.build-name}}.app.zip
+        overwrite: true
+        if-no-files-found: error
     - name: Release
       uses: softprops/action-gh-release@v1
-      if: inputs.package == 'true' && startsWith(github.ref, 'refs/tags/')
+      if: inputs.package == 'true' && startsWith(github.ref, 'refs/tags/') && runner.os != 'macOS'
       with:
-        files: |
-          */bin/*
+        files: ${{ inputs.app-working-directory }}/build/bin/${{inputs.build-name}}
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      if: inputs.package == 'true' && startsWith(github.ref, 'refs/tags/') && runner.os == 'macOS'
+      with:
+        files: ${{ inputs.app-working-directory }}/build/bin/${{inputs.build-name}}.pkg
